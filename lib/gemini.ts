@@ -42,7 +42,7 @@ export async function think(
   context: Record<string, unknown>
 ): Promise<{ memories: string[]; reflection: string }> {
   const model = genAI.getGenerativeModel({
-    model: 'gemini-1.5-flash',
+    model: 'gemini-3.8-flash',
     systemInstruction: SYSTEM_PROMPT,
   })
 
