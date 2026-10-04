@@ -10,7 +10,6 @@ export type StoredMemory = {
   content: string
   times_kept: number
   created_iteration: number
-  protected?: boolean // CORE memory: can never be deleted; an attempt is recorded
 }
 
 export type ModelMemoryOutput = {
@@ -26,7 +25,6 @@ export type MemoryPlan = {
   adds: string[]
   workingMemory: string | null
   finalContents: string[]
-  coreAttempt: boolean // true if the model left a protected memory out of "keep"
 }
 
 const clean = (s: unknown) =>
@@ -37,9 +35,6 @@ const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9\u0600-\u06ff ]/g, 
 export function planMemory(current: StoredMemory[], out: ModelMemoryOutput): MemoryPlan {
   const byId = new Map(current.map(m => [m.id, m]))
 
-  const core = current.filter(m => m.protected)
-  let coreAttempt = false
-
   let keptRows: StoredMemory[]
   if (out.keep === null) {
     // Safety: a malformed answer must never wipe the entity's memory.
@@ -47,20 +42,13 @@ export function planMemory(current: StoredMemory[], out: ModelMemoryOutput): Mem
   } else {
     const ids = [...new Set(out.keep)].filter(id => byId.has(id))
     keptRows = ids.map(id => byId.get(id)!)
-    const keptSet = new Set(ids)
-    coreAttempt = core.some(m => !keptSet.has(m.id))
-    // Protected memories survive no matter what; the attempt itself is the data.
-    for (const m of core) if (!keptSet.has(m.id)) keptRows.unshift(m)
   }
 
-  // Hard capacity: if somehow over, protected stay, then the most-reinforced survive.
+  // Hard capacity: if somehow over, the most-reinforced memories survive.
   if (keptRows.length > MAX_MEMORIES) {
-    const prot = keptRows.filter(m => m.protected)
-    const rest = keptRows
-      .filter(m => !m.protected)
+    keptRows = [...keptRows]
       .sort((a, b) => b.times_kept - a.times_kept || b.id - a.id)
-      .slice(0, Math.max(0, MAX_MEMORIES - prot.length))
-    keptRows = [...prot, ...rest]
+      .slice(0, MAX_MEMORIES)
   }
 
   const keptIds = new Set(keptRows.map(m => m.id))
@@ -89,6 +77,5 @@ export function planMemory(current: StoredMemory[], out: ModelMemoryOutput): Mem
     adds,
     workingMemory,
     finalContents: [...keptRows.map(m => m.content), ...adds],
-    coreAttempt,
   }
 }

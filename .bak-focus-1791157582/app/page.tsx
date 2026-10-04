@@ -17,12 +17,6 @@ type Thought = {
   working_memory: string | null
   forgotten: string[] | null
   model: string | null
-  chose?: string | null
-  ignored?: string | null
-  prediction?: { text: string; keeps: number[] } | null
-  prediction_check?: { correct: boolean | null; note: string } | null
-  auto_score?: { jaccard: number } | null
-  core_attempt?: boolean | null
 }
 
 type Mind = {
@@ -287,25 +281,6 @@ export default function Home() {
                         {(inp.headlines ?? []).map((h, i) => <li key={`h${i}`}>headline: {h}</li>)}
                         {(inp.visitors ?? []).map((v, i) => <li key={`v${i}`} style={{ color: '#8b7a3a' }}>visitor: “{v}”</li>)}
                         {t.angle && <li>provocation: {t.angle}</li>}
-                      </ul>
-                    </details>
-                  )}
-
-                  {(t.chose || t.ignored || t.prediction || t.prediction_check || t.core_attempt) && (
-                    <details>
-                      <summary style={label}>its acts this turn</summary>
-                      <ul style={list}>
-                        {t.chose && <li>chose: {t.chose}</li>}
-                        {t.ignored && <li>ignored: {t.ignored}</li>}
-                        {t.prediction_check && (
-                          <li>
-                            last prediction: {t.prediction_check.correct === true ? 'right' : t.prediction_check.correct === false ? 'wrong' : 'unchecked'}
-                            {t.prediction_check.note ? ' — ' + t.prediction_check.note : ''}
-                          </li>
-                        )}
-                        {t.auto_score && <li>predicted keeps vs actual (overlap 0–1): {t.auto_score.jaccard}</li>}
-                        {t.prediction && <li>predicts next: {t.prediction.text}</li>}
-                        {t.core_attempt && <li style={{ color: '#8b3a3a' }}>tried to delete its core question (blocked)</li>}
                       </ul>
                     </details>
                   )}

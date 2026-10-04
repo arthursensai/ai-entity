@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
-import { think, type Prediction } from '@/lib/gemini'
+import { think } from '@/lib/gemini'
 import { loadMind, commitMemory } from '@/lib/memory'
 import { planMemory } from '@/lib/memory-plan'
 import { retiredWords } from '@/lib/language'
@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
     // Recent thoughts: iteration, repetition detection, and the "opponent" (last thought).
     const { data: recent, error: recentErr } = await supabaseAdmin
       .from('thoughts')
-      .select('iteration, reflection, created_at, prediction')
+      .select('iteration, reflection, created_at')
       .order('created_at', { ascending: false })
       .limit(10)
     if (recentErr) throw recentErr
@@ -58,7 +58,6 @@ export async function POST(req: NextRequest) {
       memories: mind.memories,
       lastReflection: latest?.reflection ?? null,
       retired, angle, world,
-      lastPrediction: (latest?.prediction as Prediction | null) ?? null,
     })
 
     // Decide what survives (pure function), record the thought, THEN delete for real.
@@ -67,24 +66,6 @@ export async function POST(req: NextRequest) {
       keep: result.keep,
       add: result.add,
     })
-
-    // Objective score of last turn's prediction: overlap between the shelf ids it said it
-    // would keep and the ids it actually kept (CORE excluded). Not self-graded.
-    let autoScore: Record<string, unknown> | null = null
-    const lastP = (latest?.prediction as Prediction | null) ?? null
-    if (lastP && result.keep !== null) {
-      const coreIds = new Set(mind.memories.filter(m => m.protected).map(m => m.id))
-      const predicted = new Set((lastP.keeps ?? []).filter(id => !coreIds.has(id)))
-      const actual = new Set(plan.keptRows.filter(m => !m.protected).map(m => m.id))
-      const union = new Set([...predicted, ...actual])
-      if (predicted.size > 0 && union.size > 0) {
-        const inter = [...predicted].filter(id => actual.has(id)).length
-        autoScore = {
-          predicted_keeps: [...predicted], actual_keeps: [...actual],
-          jaccard: Number((inter / union.size).toFixed(2)),
-        }
-      }
-    }
 
     const { error: insertErr } = await supabaseAdmin.from('thoughts').insert({
       iteration,
@@ -101,12 +82,6 @@ export async function POST(req: NextRequest) {
       forgotten: plan.forgottenContents,
       retired_words: retired,
       model: result.model,
-      chose: result.chose,
-      ignored: result.ignored,
-      prediction: result.prediction,
-      prediction_check: result.predictionCheck,
-      auto_score: autoScore,
-      core_attempt: plan.coreAttempt,
     })
     if (insertErr) throw insertErr
 
@@ -122,7 +97,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: true, iteration, model: result.model, retried: result.retried,
       kept: plan.keptRows.length, added: plan.adds.length, forgotten: plan.forgetIds.length,
-      visitors: visitors.length, coreAttempt: plan.coreAttempt,
+      visitors: visitors.length,
     })
   } catch (err) {
     console.error('[tick error]', err)

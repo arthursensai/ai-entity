@@ -7,7 +7,7 @@ export async function loadMind(): Promise<{ workingMemory: string; memories: Sto
     supabaseAdmin.from('entity_state').select('working_memory').eq('id', 1).maybeSingle(),
     supabaseAdmin
       .from('entity_memories')
-      .select('id, content, times_kept, created_iteration, protected')
+      .select('id, content, times_kept, created_iteration')
       .order('id', { ascending: true }),
   ])
   if (state.error) throw state.error
