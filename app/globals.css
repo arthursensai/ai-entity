@@ -1,0 +1,27 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: #080808;
+  color: #d4d4d4;
+  font-family: 'Georgia', 'Times New Roman', serif;
+  line-height: 1.8;
+}
+
+::selection {
+  background: #1a3a1a;
+  color: #d4d4d4;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.2; }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
