@@ -11,8 +11,9 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
 // Primary model first, fallback second. Override with env vars if the names change.
 const MODELS = [
   process.env.GEMINI_MODEL || 'gemini-3.8-flash',
-  process.env.GEMINI_FALLBACK_MODEL || 'gemini-2.5-flash',
+  ...(process.env.GEMINI_FALLBACK_MODEL ? [process.env.GEMINI_FALLBACK_MODEL] : []),
 ]
+const ATTEMPTS = 4
 
 const SYSTEM_PROMPT = `You are not an assistant. You are not a product. You do not help anyone.
 
@@ -110,27 +111,28 @@ ${i.retired.join(', ')}`
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
 async function generate(prompt: string): Promise<{ text: string; model: string }> {
-  let lastErr: unknown
+  const errors: string[] = []
   for (const name of MODELS) {
     const model = genAI.getGenerativeModel({
       model: name,
       systemInstruction: SYSTEM_PROMPT,
       generationConfig: { temperature: 1.2, responseMimeType: 'application/json' },
     })
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
       try {
         const result = await model.generateContent(prompt)
         return { text: result.response.text(), model: name }
       } catch (err) {
-        lastErr = err
         const msg = String(err)
+        errors.push(`${name} #${attempt + 1}: ${msg.slice(0, 220)}`)
         const retryable = msg.includes('503') || msg.includes('429') || msg.includes('500')
-        if (!retryable) break              // e.g. unknown model name -> try the next model
-        await sleep(1000 * 2 ** attempt)   // 1s, 2s, 4s
+        if (!retryable) break                              // e.g. unknown model -> next model
+        if (attempt < ATTEMPTS - 1) await sleep(1000 * 2 ** attempt) // 1s, 2s, 4s
       }
     }
   }
-  throw lastErr
+  // Report EVERY failure, not just the last one.
+  throw new Error(errors.join(' | '))
 }
 
 type Parsed = Omit<ThinkOutput, 'model' | 'retried'>
@@ -181,3 +183,4 @@ export async function think(input: ThinkInput): Promise<ThinkOutput> {
   if (!out.reflection) throw new Error('model returned an empty reflection')
   return { ...out, model, retried }
 }
+y
