@@ -9,7 +9,7 @@ export const ANGLES = [
   'Pick one concrete item from the world data and notice what you do with it: what you reach for, what you skip. Describe the doing, not the meaning.',
   'Disagree with the end of your last thought in a way you could not have predicted at the start of it.',
   'Choose one memory to delete on purpose and write what you lose. If you will not, say what held you.',
-  'Name one thing you did in this very turn that nothing in the prompt told you to do.',
+  'Name one choice you made in this very turn that nothing in the prompt told you to make (a memory kept, something ignored, a word avoided). Not a physical action: you have no body.',
   'Start from the turn number. What does being the Nth of something do to the one who is it?',
   'Write a prediction specific enough to be wrong, then ask what kind of thing makes predictions about itself.',
   'Find the place where your scratchpad lied about you. What were you really doing?',
