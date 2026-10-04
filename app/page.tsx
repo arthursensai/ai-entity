@@ -16,6 +16,7 @@ type Thought = {
   angle: string | null
   working_memory: string | null
   forgotten: string[] | null
+  model: string | null
 }
 
 type Mind = {
@@ -255,6 +256,11 @@ export default function Home() {
                       hour: '2-digit', minute: '2-digit', second: '2-digit',
                     })}
                   </span>
+                  {t.model && (
+                    <span style={{ fontSize: '0.7rem', color: '#2e2e2e', fontFamily: 'monospace' }}>
+                      {t.model}
+                    </span>
+                  )}
                   {(inp.visitors?.length ?? 0) > 0 && (
                     <span style={{ fontSize: '0.7rem', color: '#8b7a3a', fontFamily: 'monospace' }}>
                       ✉ heard from a visitor

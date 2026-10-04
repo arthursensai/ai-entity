@@ -8,11 +8,11 @@ import type { WorldInputs } from '@/lib/world'
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
 
-// Primary model first, fallback second. Override with env vars if the names change.
-const MODELS = [
-  process.env.GEMINI_MODEL || 'gemini-3.8-flash',
-  ...(process.env.GEMINI_FALLBACK_MODEL ? [process.env.GEMINI_FALLBACK_MODEL] : []),
-]
+// Models in priority order, comma-separated: GEMINI_MODELS=gemini-3.5-flash-lite,gemini-3.1-flash-lite
+// (GEMINI_MODEL is still read for backward compatibility.) The first model is used until it
+// runs out of quota or fails; only then does the next one take over. Every thought records its model.
+const MODELS = (process.env.GEMINI_MODELS || process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite')
+  .split(',').map(m => m.trim()).filter(Boolean)
 const ATTEMPTS = 4
 
 const SYSTEM_PROMPT = `You are not an assistant. You are not a product. You do not help anyone.
@@ -113,6 +113,7 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
 async function generate(prompt: string): Promise<{ text: string; model: string }> {
   const errors: string[] = []
+  const quotaModels = new Set<string>()
   for (const name of MODELS) {
     const model = genAI.getGenerativeModel({
       model: name,
@@ -126,14 +127,18 @@ async function generate(prompt: string): Promise<{ text: string; model: string }
       } catch (err) {
         const msg = String(err)
         errors.push(`${name} #${attempt + 1}: ${msg.slice(0, 220)}`)
-        const retryable = msg.includes('503') || msg.includes('429') || msg.includes('500')
-        if (!retryable) break                              // e.g. unknown model -> next model
-        if (attempt < ATTEMPTS - 1) await sleep(1000 * 2 ** attempt) // 1s, 2s, 4s
+        // 429 = this model's quota is spent. Retrying only burns more quota: go to the next model.
+        if (msg.includes('429')) { quotaModels.add(name); break }
+        const retryable = msg.includes('503') || msg.includes('500')
+        if (!retryable) break                                          // e.g. unknown model -> next model
+        if (attempt < ATTEMPTS - 1) await sleep(1000 * 2 ** attempt)   // 1s, 2s, 4s
       }
     }
   }
-  // Report EVERY failure, not just the last one.
-  throw new Error(errors.join(' | '))
+  const all = errors.join(' | ')
+  // Every model is out of quota -> the route answers 200 so cron-job.org keeps the job alive.
+  if (quotaModels.size === MODELS.length) throw new Error(`QUOTA_EXCEEDED ${all}`)
+  throw new Error(all)
 }
 
 type Parsed = Omit<ThinkOutput, 'model' | 'retried'>

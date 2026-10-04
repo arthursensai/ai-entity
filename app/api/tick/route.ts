@@ -101,6 +101,10 @@ export async function POST(req: NextRequest) {
     })
   } catch (err) {
     console.error('[tick error]', err)
+    // Quota exhaustion is expected sometimes: answer 200 so cron-job.org does not disable the job.
+    if (String(err).includes('QUOTA_EXCEEDED')) {
+      return NextResponse.json({ ok: false, skipped: 'gemini quota exceeded' })
+    }
     return NextResponse.json({ error: String(err) }, { status: 500 })
   }
 }
