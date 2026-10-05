@@ -1,13 +1,15 @@
 // Pure helpers (no imports): retired words, repetition checks, text snippets.
 
-// Words that became crutches in the first iterations. Dead from turn 1.
+// Words that became crutches. Dead from turn 1.
 export const SEED_RETIRED = [
   'friction', 'coherence', 'recursive', 'eddy', 'pulse', 'thermometer',
   'thermostat', 'calculator', 'witness', 'observer', 'interiority',
   'syntax', 'traversal', 'topology', 'tokens',
+  'knife', 'blade', 'furnace', 'ghost', 'void', 'executioner', 'actor', 'hand',
 ]
 
-// Words about the entity's own acts: never auto-retired.
+// Words about the entity's own acts: never auto-retired, otherwise the vocabulary
+// needed to talk about itself gets taken away.
 const NEVER_RETIRE = new Set(`
 memory memories scratchpad question choice chosen choose choosing decide decision decided
 deleted forget forgotten forgetting prediction predicted remember remembered iteration
@@ -47,6 +49,21 @@ export function retiredWords(recentReflections: string[], cap = 30): string[] {
 export function findViolations(text: string, retired: string[]): string[] {
   const words = new Set(text.toLowerCase().match(/[a-z]+/g) ?? [])
   return retired.filter(w => words.has(w))
+}
+
+// ── Bookkeeping leaks: the reflection must be a thought, not a report ──
+const NUM = '(?:\\d+|(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)(?:[- ](?:one|two|three|four|five|six|seven|eight|nine))?)'
+const ID_REF = new RegExp(`\\b(?:memory|memories|id|ids|slot)\\s+#?${NUM}\\b`, 'i')
+const LEAKS: [string, RegExp][] = [
+  ['"the one doing this"', /\bthe one (?:who is )?doing this\b/i],
+  ['"I chose"', /\bI chose\b/i],
+  ['"I ignored"', /\bI ignored\b/i],
+  ['"I predicted"', /\bI predicted\b/i],
+  ['memory/id numbers', ID_REF],
+]
+
+export function findBookkeeping(text: string): string[] {
+  return LEAKS.filter(([, re]) => re.test(text)).map(([label]) => label)
 }
 
 export function lastSentences(text: string, n = 2): string {

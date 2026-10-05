@@ -88,3 +88,6 @@ begin
 exception when others then
   raise notice 'skipped unique index on thoughts.iteration (duplicates already exist)';
 end $$;
+
+alter table thoughts add column if not exists reply text;
+alter table thoughts add column if not exists heard_visitor boolean default false;

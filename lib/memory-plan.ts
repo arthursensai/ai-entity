@@ -32,6 +32,12 @@ export type MemoryPlan = {
 const clean = (s: unknown) =>
   String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, MAX_MEMORY_LEN)
 
+// Memories about other memories' numbers or digits fed a closed loop (deletion bookkeeping
+// remembering deletion bookkeeping). Such memories are rejected.
+const NUMW = '(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)'
+const META = new RegExp(`\\d|\\b(?:memory|memories|id|ids|slot)\\s+#?${NUMW}\\b`, 'i')
+export const isMetaMemory = (s: string) => META.test(s)
+
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9\u0600-\u06ff ]/g, '').trim()
 
 export function planMemory(current: StoredMemory[], out: ModelMemoryOutput): MemoryPlan {
@@ -73,6 +79,7 @@ export function planMemory(current: StoredMemory[], out: ModelMemoryOutput): Mem
     if (adds.length >= room) break
     const s = clean(raw)
     if (s.length < 3) continue
+    if (isMetaMemory(s)) continue
     const k = norm(s)
     if (!k || seen.has(k)) continue
     seen.add(k)

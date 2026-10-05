@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
-import { think, type Prediction } from '@/lib/gemini'
+import { think, type Prediction, type LastContact } from '@/lib/gemini'
 import { loadMind, commitMemory } from '@/lib/memory'
 import { planMemory } from '@/lib/memory-plan'
 import { retiredWords } from '@/lib/language'
@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
     // Recent thoughts: iteration, repetition detection, and the "opponent" (last thought).
     const { data: recent, error: recentErr } = await supabaseAdmin
       .from('thoughts')
-      .select('iteration, reflection, created_at, prediction')
+      .select('iteration, reflection, created_at, prediction, inputs, reply')
       .order('created_at', { ascending: false })
       .limit(10)
     if (recentErr) throw recentErr
@@ -49,6 +49,12 @@ export async function POST(req: NextRequest) {
     const visitors = (visitorRes.data ?? []) as Visitor[]
     const world = await getWorld(visitors)
 
+    // What the last stranger said and how it answered (shown for one more turn so it can follow up).
+    const prevVisitors = ((latest?.inputs as { visitors?: string[] } | null)?.visitors ?? []).filter(Boolean)
+    const lastContact: LastContact | null = prevVisitors.length
+      ? { visitors: prevVisitors, reply: (latest?.reply as string | null) ?? null }
+      : null
+
     const retired = retiredWords((recent ?? []).map(r => r.reflection))
     const angle = pickAngle(iteration)
 
@@ -59,6 +65,7 @@ export async function POST(req: NextRequest) {
       lastReflection: latest?.reflection ?? null,
       retired, angle, world,
       lastPrediction: (latest?.prediction as Prediction | null) ?? null,
+      lastContact,
     })
 
     // Decide what survives (pure function), record the thought, THEN delete for real.
@@ -68,21 +75,30 @@ export async function POST(req: NextRequest) {
       add: result.add,
     })
 
-    // Objective score of last turn's prediction: overlap between the shelf ids it said it
-    // would keep and the ids it actually kept (CORE excluded). Not self-graded.
+    // Objective score of last turn's prediction (not self-graded), with a dumb baseline:
+    // "it keeps everything and deletes nothing". If the entity cannot beat the baseline,
+    // its predictions say nothing about a model of itself.
     let autoScore: Record<string, unknown> | null = null
     const lastP = (latest?.prediction as Prediction | null) ?? null
     if (lastP && result.keep !== null) {
-      const coreIds = new Set(mind.memories.filter(m => m.protected).map(m => m.id))
-      const predicted = new Set((lastP.keeps ?? []).filter(id => !coreIds.has(id)))
+      const shelfIds = mind.memories.filter(m => !m.protected).map(m => m.id)   // what existed at turn start
       const actual = new Set(plan.keptRows.filter(m => !m.protected).map(m => m.id))
-      const union = new Set([...predicted, ...actual])
-      if (predicted.size > 0 && union.size > 0) {
-        const inter = [...predicted].filter(id => actual.has(id)).length
-        autoScore = {
-          predicted_keeps: [...predicted], actual_keeps: [...actual],
-          jaccard: Number((inter / union.size).toFixed(2)),
-        }
+      const jac = (A: Set<number>, B: Set<number>) => {
+        const u = new Set([...A, ...B])
+        if (u.size === 0) return null
+        return Number(([...A].filter(x => B.has(x)).length / u.size).toFixed(2))
+      }
+      const predicted = new Set((lastP.keeps ?? []).filter(id => shelfIds.includes(id)))
+      const actualDeletes = plan.forgetIds.length
+      autoScore = {
+        predicted_keeps: [...predicted],
+        actual_keeps: [...actual],
+        jaccard: jac(predicted, actual),
+        baseline_jaccard: jac(new Set(shelfIds), actual),
+        predicted_deletes: lastP.deletes,
+        actual_deletes: actualDeletes,
+        deletes_match: lastP.deletes === null ? null : lastP.deletes === actualDeletes,
+        baseline_deletes_match: actualDeletes === 0,
       }
     }
 
@@ -107,6 +123,8 @@ export async function POST(req: NextRequest) {
       prediction_check: result.predictionCheck,
       auto_score: autoScore,
       core_attempt: plan.coreAttempt,
+      reply: result.reply,
+      heard_visitor: visitors.length > 0,
     })
     if (insertErr) throw insertErr
 
@@ -122,7 +140,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: true, iteration, model: result.model, retried: result.retried,
       kept: plan.keptRows.length, added: plan.adds.length, forgotten: plan.forgetIds.length,
-      visitors: visitors.length, coreAttempt: plan.coreAttempt,
+      visitors: visitors.length, replied: !!result.reply, coreAttempt: plan.coreAttempt,
     })
   } catch (err) {
     console.error('[tick error]', err)

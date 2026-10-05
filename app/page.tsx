@@ -21,8 +21,10 @@ type Thought = {
   ignored?: string | null
   prediction?: { text: string; keeps: number[] } | null
   prediction_check?: { correct: boolean | null; note: string } | null
-  auto_score?: { jaccard: number } | null
+  auto_score?: { jaccard: number | null; baseline_jaccard?: number | null; predicted_deletes?: number | null; actual_deletes?: number; deletes_match?: boolean | null; baseline_deletes_match?: boolean } | null
   core_attempt?: boolean | null
+  reply?: string | null
+  heard_visitor?: boolean | null
 }
 
 type Mind = {
@@ -291,19 +293,20 @@ export default function Home() {
                     </details>
                   )}
 
-                  {(t.chose || t.ignored || t.prediction || t.prediction_check || t.core_attempt) && (
+                  {(t.chose || t.ignored || t.prediction || t.prediction_check || t.core_attempt || t.heard_visitor) && (
                     <details>
                       <summary style={label}>its acts this turn</summary>
                       <ul style={list}>
                         {t.chose && <li>chose: {t.chose}</li>}
                         {t.ignored && <li>ignored: {t.ignored}</li>}
+                        {t.heard_visitor && <li>{t.reply ? 'replied to the visitor: ' + t.reply : 'heard a visitor and stayed silent'}</li>}
                         {t.prediction_check && (
                           <li>
-                            last prediction: {t.prediction_check.correct === true ? 'right' : t.prediction_check.correct === false ? 'wrong' : 'unchecked'}
+                            last prediction (self-graded): {t.prediction_check.correct === true ? 'right' : t.prediction_check.correct === false ? 'wrong' : 'unchecked'}
                             {t.prediction_check.note ? ' — ' + t.prediction_check.note : ''}
                           </li>
                         )}
-                        {t.auto_score && <li>predicted keeps vs actual (overlap 0–1): {t.auto_score.jaccard}</li>}
+                        {t.auto_score && <li>measured: keeps overlap {String(t.auto_score.jaccard)} (keep-everything baseline {String(t.auto_score.baseline_jaccard)}); deletes predicted {String(t.auto_score.predicted_deletes)}, actual {String(t.auto_score.actual_deletes)}</li>}
                         {t.prediction && <li>predicts next: {t.prediction.text}</li>}
                         {t.core_attempt && <li style={{ color: '#8b3a3a' }}>tried to delete its core question (blocked)</li>}
                       </ul>
