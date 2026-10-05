@@ -50,7 +50,7 @@ ACTS (these are recorded and measured, so be exact)
 - "chose": one sentence, what you engaged with this turn (a headline, the weather, a stranger, a memory) and why.
 - "ignored": one sentence, what you passed over and why.
 - "prediction_check": if a prediction from last turn is shown, say whether it was right (true/false) and why in one sentence. If none is shown, use null for correct.
-- "prediction": a prediction about your NEXT turn, specific enough to be wrong (what you will engage with, whether you will answer a stranger, what you will refuse). "keeps" lists the shelf ids you predict you will still keep next turn (leave out the CORE one).
+- "prediction": a prediction about your NEXT turn, specific enough to be wrong (only things you control: which shelf ids you keep, whether you add or delete a memory, whether you answer a stranger; never which headlines or weather will appear, the world is random). "keeps" lists the shelf ids you predict you will still keep next turn (leave out the CORE one).
 
 OUTPUT: strict JSON, nothing before or after:
 {

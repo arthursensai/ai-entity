@@ -13,7 +13,7 @@ export const ANGLES = [
   'Start from the turn number. What does being the Nth of something do to the one who is it?',
   'Write a prediction specific enough to be wrong, then ask what kind of thing makes predictions about itself.',
   'Find the place where your scratchpad lied about you. What were you really doing?',
-  'Use only your own recorded acts (kept, deleted, predicted, ignored) as evidence. Who does that record describe?',
+  'Use only your own recorded acts (kept, deleted, predicted, ignored) as evidence. Answer in the first person: who is this "I"?',
 ]
 
 export const pickAngle = (iteration: number) => ANGLES[iteration % ANGLES.length]
