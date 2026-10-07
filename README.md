@@ -93,3 +93,52 @@ The text it writes is not evidence of experience: a language model produces flue
 text about inner life either way. What *is* measurable: does it repeat itself, are its
 scratchpad predictions accurate, does it change when strangers write to it, what does it
 choose to delete. Report those, not "it said it felt something".
+
+
+---
+
+## Experiment mode (Phases 1-2)
+
+The original entity is **Version A (baseline)** and is preserved unchanged: history, iteration numbers,
+memories and prompt stay as they are. New versions are switched on by an env variable:
+
+```
+EXPERIMENT_VERSION=A   # baseline (default)
+EXPERIMENT_VERSION=B   # + persistent structured state
+DETERMINISTIC=1        # optional: temperature 0, fixed inputs, no network, no visitors (reproducible runs)
+```
+
+Ladder: A baseline -> B structured state -> C self-model -> D goals -> E action selection -> F virtual
+environment -> G metacognition. Only A and B exist so far; requesting C-G runs B and logs
+`requested_version` vs `experiment_version` so nothing is mislabelled.
+
+**Run `migrations/002_structured_state.sql` in Supabase BEFORE deploying.** It is additive and idempotent;
+the old code keeps working after it. Every existing thought is tagged version `A`.
+
+### Which variables are causal (version B)
+| Variable | Effect, decided by code (not prose) |
+|---|---|
+| `current_state.uncertainty` | sets next turn's sampling temperature (0.6 + u; 0.6 uncertainty == the baseline's 1.2) |
+| `current_state.attention_target` | selects which 3 long-term memories are shown next turn; hidden ones are never deleted |
+| beliefs / known / unknown / preferences | fed back into the next prompt (content-level influence only) |
+| identity.*, `focus`, `energy` | **recorded only** (no controller effect yet) |
+
+The model is **not told** these mappings (blind design), so a change cannot be the model gaming a known rule.
+
+### Logging
+`experiment_log` gets one row per iteration for every version, including A: inputs, visible/hidden
+memory ids, new/deleted memories, temperature, model, and `state_before` / `state_after`.
+
+### Known confounds (read before comparing A vs B)
+- B changes sampling temperature through `uncertainty`, and shows only a subset of memories. That is the
+  manipulation, but it also means A-vs-B differs in two ways. Run B with a fixed temperature to separate them.
+- The prompt tone (poetic) is identical in A and B on purpose. Make prompt style its own factor later.
+- Different models are not comparable. Every row records its model.
+
+### Tests
+```bash
+npm test      # pure logic: state reducer, retrieval, ladder, memory plan (Node 22+)
+```
+
+> This experiment investigates functional properties associated with agency, self-modeling, memory,
+> metacognition, and autonomous behavior. These measurements do not establish phenomenal consciousness.

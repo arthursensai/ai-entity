@@ -1,16 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
-import { think, type Prediction, type LastContact } from '@/lib/gemini'
+import { think } from '@/lib/gemini'
 import { loadMind, commitMemory } from '@/lib/memory'
 import { planMemory } from '@/lib/memory-plan'
 import { retiredWords } from '@/lib/language'
-import { getWorld, type Visitor } from '@/lib/world'
+import { getWorld, type Visitor, type WorldInputs } from '@/lib/world'
 import { pickAngle } from '@/lib/angles'
+import { parseVersion, resolveVersion } from '@/lib/experiment'
+import { applyStateUpdate, retrieveMemories, temperatureFor, type AgentState } from '@/lib/agent-state'
+import { loadAgentState, saveAgentState, logExperiment } from '@/lib/agent-state-db'
 
 export const maxDuration = 60
 export const dynamic = 'force-dynamic'
 
 const MIN_SECONDS = Number(process.env.TICK_MIN_SECONDS ?? 20)
+const BASELINE_TEMPERATURE = 1.2
+// Reproducible mode: temperature 0, no network inputs, fixed clock text, no visitor messages.
+const DETERMINISTIC = process.env.DETERMINISTIC === '1'
 
 export async function POST(req: NextRequest) {
   if (req.headers.get('x-cron-secret') !== process.env.CRON_SECRET) {
@@ -18,10 +24,12 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    // Recent thoughts: iteration, repetition detection, and the "opponent" (last thought).
+    const ver = resolveVersion(parseVersion(process.env.EXPERIMENT_VERSION))
+    const { features } = ver
+
     const { data: recent, error: recentErr } = await supabaseAdmin
       .from('thoughts')
-      .select('iteration, reflection, created_at, prediction, inputs, reply')
+      .select('iteration, reflection, created_at')
       .order('created_at', { ascending: false })
       .limit(10)
     if (recentErr) throw recentErr
@@ -33,118 +41,113 @@ export async function POST(req: NextRequest) {
 
     const iteration = (latest?.iteration ?? 0) + 1
     const now = new Date()
-    const time = now.toISOString()
-    const day = now.toLocaleDateString('en', { weekday: 'long', month: 'long', day: 'numeric' })
+    const time = DETERMINISTIC ? `turn-${iteration}` : now.toISOString()
+    const day = DETERMINISTIC ? 'fixed' : now.toLocaleDateString('en', { weekday: 'long', month: 'long', day: 'numeric' })
 
-    // Its mind, the world, and any unread messages from visitors.
-    const [mind, visitorRes] = await Promise.all([
-      loadMind(),
-      supabaseAdmin
-        .from('visitor_messages')
-        .select('id, body')
-        .is('read_iteration', null)
-        .order('id', { ascending: true })
-        .limit(3),
-    ])
-    const visitors = (visitorRes.data ?? []) as Visitor[]
-    const world = await getWorld(visitors)
+    // ── Load the mind ───────────────────────────────────────────
+    const mind = await loadMind()
+    let stateBefore: AgentState | null = null
+    let revision = 0
+    if (features.structuredState) {
+      const loaded = await loadAgentState()
+      stateBefore = loaded.state
+      revision = loaded.revision
+    }
 
-    // What the last stranger said and how it answered (shown for one more turn so it can follow up).
-    const prevVisitors = ((latest?.inputs as { visitors?: string[] } | null)?.visitors ?? []).filter(Boolean)
-    const lastContact: LastContact | null = prevVisitors.length
-      ? { visitors: prevVisitors, reply: (latest?.reply as string | null) ?? null }
-      : null
+    // Version B+: retrieval is controlled by the state; hidden memories are never deleted.
+    const visible = stateBefore ? retrieveMemories(mind.memories, stateBefore) : mind.memories
+    const visibleIds = new Set(visible.map(m => m.id))
+    const hidden = mind.memories.filter(m => !visibleIds.has(m.id))
+
+    const temperature = DETERMINISTIC ? 0 : stateBefore ? temperatureFor(stateBefore) : BASELINE_TEMPERATURE
+
+    // ── The world ───────────────────────────────────────────────
+    let visitors: Visitor[] = []
+    let world: WorldInputs
+    if (DETERMINISTIC) {
+      world = { weather: 'clear, 15°C, no wind (fixed)', headlines: ['(deterministic mode)'], visitors: [] }
+    } else {
+      const visitorRes = await supabaseAdmin
+        .from('visitor_messages').select('id, body')
+        .is('read_iteration', null).order('id', { ascending: true }).limit(3)
+      visitors = (visitorRes.data ?? []) as Visitor[]
+      world = await getWorld(visitors)
+    }
 
     const retired = retiredWords((recent ?? []).map(r => r.reflection))
     const angle = pickAngle(iteration)
 
+    // ── Language layer (LLM) ────────────────────────────────────
     const result = await think({
       iteration, time, day,
       workingMemory: mind.workingMemory,
-      memories: mind.memories,
+      memories: visible,
       lastReflection: latest?.reflection ?? null,
       retired, angle, world,
-      lastPrediction: (latest?.prediction as Prediction | null) ?? null,
-      lastContact,
+      features, state: stateBefore, temperature,
     })
 
-    // Decide what survives (pure function), record the thought, THEN delete for real.
-    const plan = planMemory(mind.memories, {
+    // ── Controller: decide what changes (pure functions) ────────
+    const plan = planMemory(visible, {
       workingMemory: result.workingMemory,
       keep: result.keep,
       add: result.add,
-    })
-
-    // Objective score of last turn's prediction (not self-graded), with a dumb baseline:
-    // "it keeps everything and deletes nothing". If the entity cannot beat the baseline,
-    // its predictions say nothing about a model of itself.
-    let autoScore: Record<string, unknown> | null = null
-    const lastP = (latest?.prediction as Prediction | null) ?? null
-    if (lastP && result.keep !== null) {
-      const shelfIds = mind.memories.filter(m => !m.protected).map(m => m.id)   // what existed at turn start
-      const actual = new Set(plan.keptRows.filter(m => !m.protected).map(m => m.id))
-      const jac = (A: Set<number>, B: Set<number>) => {
-        const u = new Set([...A, ...B])
-        if (u.size === 0) return null
-        return Number(([...A].filter(x => B.has(x)).length / u.size).toFixed(2))
-      }
-      const predicted = new Set((lastP.keeps ?? []).filter(id => shelfIds.includes(id)))
-      const actualDeletes = plan.forgetIds.length
-      autoScore = {
-        predicted_keeps: [...predicted],
-        actual_keeps: [...actual],
-        jaccard: jac(predicted, actual),
-        baseline_jaccard: jac(new Set(shelfIds), actual),
-        predicted_deletes: lastP.deletes,
-        actual_deletes: actualDeletes,
-        deletes_match: lastP.deletes === null ? null : lastP.deletes === actualDeletes,
-        baseline_deletes_match: actualDeletes === 0,
-      }
-    }
+    }, hidden)
+    const finalMemories = [...hidden.map(m => m.content), ...plan.finalContents]
+    const stateAfter = stateBefore ? applyStateUpdate(stateBefore, result.stateUpdate) : null
 
     const { error: insertErr } = await supabaseAdmin.from('thoughts').insert({
       iteration,
       reflection: result.reflection,
-      memories: plan.finalContents,
+      memories: finalMemories,
       context: { iteration, time, day },
-      inputs: {
-        weather: world.weather,
-        headlines: world.headlines,
-        visitors: visitors.map(v => v.body),
-      },
+      inputs: { weather: world.weather, headlines: world.headlines, visitors: visitors.map(v => v.body) },
       angle,
       working_memory: plan.workingMemory ?? mind.workingMemory,
       forgotten: plan.forgottenContents,
       retired_words: retired,
       model: result.model,
-      chose: result.chose,
-      ignored: result.ignored,
-      prediction: result.prediction,
-      prediction_check: result.predictionCheck,
-      auto_score: autoScore,
-      core_attempt: plan.coreAttempt,
-      reply: result.reply,
-      heard_visitor: visitors.length > 0,
+      experiment_version: ver.effective,
     })
     if (insertErr) throw insertErr
 
     await commitMemory(plan, iteration)
+    if (stateAfter) await saveAgentState(stateAfter, revision + 1)
 
     if (visitors.length > 0) {
-      await supabaseAdmin
-        .from('visitor_messages')
-        .update({ read_iteration: iteration })
-        .in('id', visitors.map(v => v.id))
+      await supabaseAdmin.from('visitor_messages')
+        .update({ read_iteration: iteration }).in('id', visitors.map(v => v.id))
+    }
+
+    // ── Experiment log (best effort: never blocks a thought) ────
+    try {
+      await logExperiment({
+        iteration,
+        experiment_version: ver.effective,
+        requested_version: ver.requested,
+        model: result.model,
+        temperature,
+        deterministic: DETERMINISTIC,
+        input: { weather: world.weather, headlines: world.headlines, visitors: visitors.map(v => v.body), angle },
+        retrieved_memory_ids: visible.map(m => m.id),
+        hidden_memory_ids: hidden.map(m => m.id),
+        new_memories: plan.adds,
+        deleted_memories: plan.forgottenContents,
+        state_before: stateBefore,
+        state_after: stateAfter,
+        extra: { retried: result.retried, downgraded: ver.downgraded },
+      })
+    } catch (logErr) {
+      console.error('[experiment_log error]', logErr)
     }
 
     return NextResponse.json({
-      ok: true, iteration, model: result.model, retried: result.retried,
-      kept: plan.keptRows.length, added: plan.adds.length, forgotten: plan.forgetIds.length,
-      visitors: visitors.length, replied: !!result.reply, coreAttempt: plan.coreAttempt,
+      ok: true, iteration, version: ver.effective, model: result.model, temperature,
+      retried: result.retried, kept: plan.keptRows.length, added: plan.adds.length,
+      forgotten: plan.forgetIds.length, hidden: hidden.length, visitors: visitors.length,
     })
   } catch (err) {
     console.error('[tick error]', err)
-    // Quota exhaustion is expected sometimes: answer 200 so cron-job.org does not disable the job.
     if (String(err).includes('QUOTA_EXCEEDED')) {
       return NextResponse.json({ ok: false, skipped: 'gemini quota exceeded' })
     }

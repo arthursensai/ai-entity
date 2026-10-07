@@ -7,6 +7,13 @@ export const SEED_RETIRED = [
   'syntax', 'traversal', 'topology', 'tokens',
 ]
 
+// Words about the entity's own acts: never auto-retired.
+const NEVER_RETIRE = new Set(`
+memory memories scratchpad question choice chosen choose choosing decide decision decided
+deleted forget forgotten forgetting prediction predicted remember remembered iteration
+whoever stranger visitor
+`.split(/\s+/).filter(Boolean))
+
 const STOP = new Set(`
 about above across actually after again against almost already also although always among another anything
 around because become becomes before behind being below between beyond cannot could doing during either
@@ -29,7 +36,7 @@ export function retiredWords(recentReflections: string[], cap = 30): string[] {
       for (const w of words) docFreq.set(w, (docFreq.get(w) ?? 0) + 1)
     }
     const auto = [...docFreq.entries()]
-      .filter(([, c]) => c >= threshold)
+      .filter(([w, c]) => c >= threshold && !NEVER_RETIRE.has(w))
       .sort((a, b) => b[1] - a[1])
       .map(([w]) => w)
     for (const w of auto) if (!out.includes(w)) out.push(w)
