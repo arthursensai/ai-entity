@@ -31,6 +31,7 @@ export type ExperimentLogRow = {
   state_before: AgentState | null
   state_after: AgentState | null
   extra?: unknown
+  run_id?: number
 }
 
 export async function logExperiment(row: ExperimentLogRow): Promise<void> {

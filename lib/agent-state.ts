@@ -137,3 +137,10 @@ export function promptView(state: AgentState) {
     preferences: state.preferences,
   }
 }
+
+/** Did retrieval actually follow attention? null when nothing was attended to. (Logged per turn.) */
+export function retrievalHit(visible: { content: string }[], state: AgentState): boolean | null {
+  const q = tokens(state.current_state.attention_target)
+  if (q.size === 0) return null
+  return visible.some(m => { for (const t of tokens(m.content)) if (q.has(t)) return true; return false })
+}

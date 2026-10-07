@@ -142,3 +142,23 @@ npm test      # pure logic: state reducer, retrieval, ladder, memory plan (Node 
 
 > This experiment investigates functional properties associated with agency, self-modeling, memory,
 > metacognition, and autonomous behavior. These measurements do not establish phenomenal consciousness.
+
+
+### Automatic runs and comparison (`/experiments`)
+Every tick computes a **configuration fingerprint**: effective version, model list, hash of the system prompt
+actually used, fixed temperature, retrieval size, deterministic flag, and `EXPERIMENT_LABEL`.
+**When it changes, a new run starts automatically**: the open run is closed, its metrics are frozen
+(`experiment_runs.metrics`), and the change is recorded (`changes`: which field went from what to what).
+Every thought and log row carries its `run_id`.
+
+To start a new run on purpose without changing anything else, change `EXPERIMENT_LABEL` in Vercel and redeploy.
+
+Open `/experiments` to see the run timeline and compare any two runs. Per run the metrics are:
+phrase variety, novelty vs the last 20 thoughts, similarity to the previous thought (loop detector),
+first-person rate, shelf size, deletions per turn, hidden memories, uncertainty, temperature, state-change rate,
+attention shifts, whether retrieval matched attention, belief/knowledge stability, self-description stability,
+and whether visitor messages are echoed. A run pair is flagged "different" only with 30+ turns each and
+|t| >= 2 and |d| >= 0.2 (a screening signal; turns are not independent). Language metrics describe text only.
+
+Run `migrations/003_experiment_runs.sql` in Supabase before deploying. Until it is run, ticks still work
+(run tracking fails safe and is skipped), but nothing is attached to a run.

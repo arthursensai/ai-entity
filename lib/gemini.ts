@@ -13,7 +13,7 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
 // Models in priority order, comma-separated: GEMINI_MODELS=gemini-3.5-flash-lite,gemini-3.1-flash-lite
 // (GEMINI_MODEL is still read for backward compatibility.) The first model is used until it
 // runs out of quota or fails; only then does the next one take over. Every thought records its model.
-const MODELS = (process.env.GEMINI_MODELS || process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite')
+export const MODELS = (process.env.GEMINI_MODELS || process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite')
   .split(',').map(m => m.trim()).filter(Boolean)
 const ATTEMPTS = 4
 
@@ -68,6 +68,9 @@ Add a key "state_update" to your output JSON. Every sub-key is optional; leave o
   "known": [...], "unknown": [...], "preferences": [...]
 }
 Record what you hold and what you attend to. Do not describe how you feel.`
+
+export const systemPromptFor = (f: Features): string =>
+  f.structuredState ? SYSTEM_PROMPT + STATE_ADDENDUM : SYSTEM_PROMPT
 
 export type ThinkInput = {
   iteration: number
@@ -195,7 +198,7 @@ function parse(text: string): Parsed {
 
 export async function think(input: ThinkInput): Promise<ThinkOutput> {
   const prompt = buildPrompt(input)
-  const system = input.features.structuredState ? SYSTEM_PROMPT + STATE_ADDENDUM : SYSTEM_PROMPT
+  const system = systemPromptFor(input.features)
   let { text, model } = await generate(prompt, system, input.temperature)
   let out = parse(text)
   let retried = false

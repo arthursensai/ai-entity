@@ -129,6 +129,9 @@ export default function Home() {
         <span style={{ fontSize: '0.7rem', color: '#444', fontFamily: 'monospace', letterSpacing: '0.12em' }}>
           LIVE — a new thought every few minutes
         </span>
+        <a href="/experiments" style={{ marginLeft: 'auto', fontSize: '0.7rem', color: '#4a4a4a', fontFamily: 'monospace', textDecoration: 'none' }}>
+          experiments →
+        </a>
       </div>
 
       <header style={{ marginBottom: '3rem' }}>

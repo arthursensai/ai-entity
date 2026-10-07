@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase-admin'
-import { think } from '@/lib/gemini'
+import { think, MODELS, systemPromptFor } from '@/lib/gemini'
 import { loadMind, commitMemory } from '@/lib/memory'
 import { planMemory } from '@/lib/memory-plan'
 import { retiredWords } from '@/lib/language'
 import { getWorld, type Visitor, type WorldInputs } from '@/lib/world'
 import { pickAngle } from '@/lib/angles'
 import { parseVersion, resolveVersion } from '@/lib/experiment'
-import { applyStateUpdate, retrieveMemories, temperatureFor, type AgentState } from '@/lib/agent-state'
+import { applyStateUpdate, retrieveMemories, retrievalHit, temperatureFor, RETRIEVAL_K, type AgentState } from '@/lib/agent-state'
+import { hashString, type RunConfig } from '@/lib/run-config'
+import { ensureRun } from '@/lib/runs'
 import { loadAgentState, saveAgentState, logExperiment } from '@/lib/agent-state-db'
 
 export const maxDuration = 60
@@ -17,6 +19,11 @@ const MIN_SECONDS = Number(process.env.TICK_MIN_SECONDS ?? 20)
 const BASELINE_TEMPERATURE = 1.2
 // Reproducible mode: temperature 0, no network inputs, fixed clock text, no visitor messages.
 const DETERMINISTIC = process.env.DETERMINISTIC === '1'
+// Optional: pin the temperature (separates the uncertainty->temperature link from the rest of version B).
+const FIXED_TEMPERATURE = (() => {
+  const n = Number(process.env.FIXED_TEMPERATURE)
+  return process.env.FIXED_TEMPERATURE && Number.isFinite(n) && n >= 0 && n <= 2 ? n : null
+})()
 
 export async function POST(req: NextRequest) {
   if (req.headers.get('x-cron-secret') !== process.env.CRON_SECRET) {
@@ -59,7 +66,8 @@ export async function POST(req: NextRequest) {
     const visibleIds = new Set(visible.map(m => m.id))
     const hidden = mind.memories.filter(m => !visibleIds.has(m.id))
 
-    const temperature = DETERMINISTIC ? 0 : stateBefore ? temperatureFor(stateBefore) : BASELINE_TEMPERATURE
+    const temperature = DETERMINISTIC ? 0
+      : FIXED_TEMPERATURE ?? (stateBefore ? temperatureFor(stateBefore) : BASELINE_TEMPERATURE)
 
     // ── The world ───────────────────────────────────────────────
     let visitors: Visitor[] = []
@@ -96,6 +104,27 @@ export async function POST(req: NextRequest) {
     const finalMemories = [...hidden.map(m => m.content), ...plan.finalContents]
     const stateAfter = stateBefore ? applyStateUpdate(stateBefore, result.stateUpdate) : null
 
+    // ── Run tracking: a config change closes the old run and opens a new one ──
+    const config: RunConfig = {
+      version: ver.effective,
+      requested_version: ver.requested,
+      deterministic: DETERMINISTIC,
+      models: MODELS,
+      prompt_hash: hashString(systemPromptFor(features)),
+      fixed_temperature: FIXED_TEMPERATURE,
+      retrieval_k: RETRIEVAL_K,
+      label: (process.env.EXPERIMENT_LABEL ?? '').trim(),
+    }
+    let runId: number | null = null
+    let runStarted = false
+    try {
+      const r = await ensureRun(config, iteration)
+      runId = r.runId
+      runStarted = r.started
+    } catch (runErr) {
+      console.error('[run tracking error]', runErr)   // never blocks a thought
+    }
+
     const { error: insertErr } = await supabaseAdmin.from('thoughts').insert({
       iteration,
       reflection: result.reflection,
@@ -108,6 +137,7 @@ export async function POST(req: NextRequest) {
       retired_words: retired,
       model: result.model,
       experiment_version: ver.effective,
+      ...(runId ? { run_id: runId } : {}),
     })
     if (insertErr) throw insertErr
 
@@ -135,7 +165,12 @@ export async function POST(req: NextRequest) {
         deleted_memories: plan.forgottenContents,
         state_before: stateBefore,
         state_after: stateAfter,
-        extra: { retried: result.retried, downgraded: ver.downgraded },
+        extra: {
+          retried: result.retried,
+          downgraded: ver.downgraded,
+          retrieval_hit: stateBefore ? retrievalHit(visible, stateBefore) : null,
+        },
+        ...(runId ? { run_id: runId } : {}),
       })
     } catch (logErr) {
       console.error('[experiment_log error]', logErr)
@@ -145,6 +180,7 @@ export async function POST(req: NextRequest) {
       ok: true, iteration, version: ver.effective, model: result.model, temperature,
       retried: result.retried, kept: plan.keptRows.length, added: plan.adds.length,
       forgotten: plan.forgetIds.length, hidden: hidden.length, visitors: visitors.length,
+      run: runId, newRun: runStarted,
     })
   } catch (err) {
     console.error('[tick error]', err)
